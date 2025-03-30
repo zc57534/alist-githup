@@ -1,0 +1,49 @@
+name: Alist Public Test
+on:
+  workflow_dispatch:  # 支持手动触发
+
+jobs:
+  deploy-alist:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Alist
+      run: |
+        # 安装 Alist（最新版）
+        curl -fsSL "https://alist.nn.ci/v3.sh" | bash -s install
+        # 自动生成随机密码
+        ./alist admin random | grep -oP 'password: \K.*' > password.txt
+
+    - name: Expose with ngrok
+      uses: actions-hub/ngrok@master
+      env:
+        NGROK_AUTH: ${{ secrets.NGROK_TOKEN }}  # 需在Secrets配置你的ngrok token
+        NGROK_CONFIG: |
+          web_addr: 0.0.0.0:4040
+          tunnels:
+            first:
+              proto: http
+              addr: 5244
+              bind_tls: false
+      continue-on-error: true  # 防止ngrok断开导致任务失败
+
+    - name: Get Server Info
+      run: |
+        echo "=== 系统信息 ==="
+        uname -a
+        echo "\n=== 存储空间 ==="
+        df -h
+        echo "\n=== 内存信息 ==="
+        free -m
+        echo "\n=== CPU 架构 ==="
+        lscpu | grep 'Model name'
+        echo "\n=== GitHub 环境详情 ==="
+        echo "Runner OS: ${{ runner.os }}"
+        echo "Workspace: ${{ github.workspace }}"
+
+    - name: Show Access Info
+      run: |
+        echo "公网访问地址：http://$(curl -s localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')"
+        echo "Alist 管理员密码：$(cat password.txt)"
