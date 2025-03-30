@@ -4,37 +4,45 @@ on: [workflow_dispatch]
 jobs:
   deploy-alist:
     runs-on: ubuntu-latest
+    env:
+      ALIST_DATA_DIR: /tmp/alist_data
+    
     steps:
+    # 系统环境准备
     - name: Setup Environment
       run: |
-        # 安装系统工具
-        sudo apt-get update && sudo apt-get install -y jq curl
+        sudo apt-get update
+        sudo apt-get install -y jq curl wget
+        mkdir -p $ALIST_DATA_DIR
         
-        # 安装 Alist
-        curl -fsSL "https://alist.nn.ci/v3.sh" | bash -s install
-        
-        # 生成访问凭证
-        ./alist admin random | grep -oP 'password: \K.*' > cred.txt
-
-    - name: Get Network Info
+    # Alist 安装阶段 [1,5](@ref)
+    - name: Install Alist
       run: |
-        echo "=== 服务器公网IP ==="
+        curl -fsSL "https://alist.nn.ci/v3.sh" | sudo bash -s install
+        sudo chmod +x /usr/bin/alist
+        
+    # 服务启动阶段
+    - name: Start Alist Service
+      run: |
+        nohup sudo alist server --data $ALIST_DATA_DIR > alist.log 2>&1 &
+        sleep 10  # 等待服务启动
+        
+    # 系统信息采集 [2,6](@ref)
+    - name: Get Server Info
+      run: |
+        echo "=== 存储空间 ==="
+        df -h
+        echo "\n=== 内存信息 ==="
+        free -m
+        echo "\n=== CPU 信息 ==="
+        lscpu | grep -E 'Model name|Architecture'
+        echo "\n=== 公网地址 ==="
         curl -4 icanhazip.com
         
-        echo "\n=== 开放端口检测 ==="
-        sudo lsof -i :5244 || echo "端口未监听"
-
-    - name: Expose Service
-      timeout-minutes: 360  # 最大运行时长
+    # 访问信息输出
+    - name: Show Access Info
       run: |
-        # 启动 Alist 服务
-        ./alist server --data /tmp/alist_data &
-        
-        # 保持服务运行
-        while true; do sleep 300; done
-
-    - name: Output Info
-      run: |
-        echo "Alist 管理密码: $(cat cred.txt)"
-        echo "访问端点: http://localhost:5244"
-        echo "GitHub Runner IP: $(curl -s icanhazip.com)"
+        echo "Alist 管理密码：$(sudo alist admin | grep -oP 'password: \K.*')"
+        echo "本地访问地址：http://localhost:5244"
+        echo "运行日志："
+        tail -n 20 alist.log
