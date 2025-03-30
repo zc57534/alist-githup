@@ -1,49 +1,40 @@
 name: Alist Public Test
-on:
-  workflow_dispatch:  # 支持手动触发
+on: [workflow_dispatch]
 
 jobs:
   deploy-alist:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup Alist
+    - name: Setup Environment
       run: |
-        # 安装 Alist（最新版）
+        # 安装系统工具
+        sudo apt-get update && sudo apt-get install -y jq curl
+        
+        # 安装 Alist
         curl -fsSL "https://alist.nn.ci/v3.sh" | bash -s install
-        # 自动生成随机密码
-        ./alist admin random | grep -oP 'password: \K.*' > password.txt
+        
+        # 生成访问凭证
+        ./alist admin random | grep -oP 'password: \K.*' > cred.txt
 
-    - name: Expose with ngrok
-      uses: actions-hub/ngrok@master
-      env:
-        NGROK_AUTH: ${{ secrets.NGROK_TOKEN }}  # 需在Secrets配置你的ngrok token
-        NGROK_CONFIG: |
-          web_addr: 0.0.0.0:4040
-          tunnels:
-            first:
-              proto: http
-              addr: 5244
-              bind_tls: false
-      continue-on-error: true  # 防止ngrok断开导致任务失败
-
-    - name: Get Server Info
+    - name: Get Network Info
       run: |
-        echo "=== 系统信息 ==="
-        uname -a
-        echo "\n=== 存储空间 ==="
-        df -h
-        echo "\n=== 内存信息 ==="
-        free -m
-        echo "\n=== CPU 架构 ==="
-        lscpu | grep 'Model name'
-        echo "\n=== GitHub 环境详情 ==="
-        echo "Runner OS: ${{ runner.os }}"
-        echo "Workspace: ${{ github.workspace }}"
+        echo "=== 服务器公网IP ==="
+        curl -4 icanhazip.com
+        
+        echo "\n=== 开放端口检测 ==="
+        sudo lsof -i :5244 || echo "端口未监听"
 
-    - name: Show Access Info
+    - name: Expose Service
+      timeout-minutes: 360  # 最大运行时长
       run: |
-        echo "公网访问地址：http://$(curl -s localhost:4040/api/tunnels | jq -r '.tunnels[0].public_url')"
-        echo "Alist 管理员密码：$(cat password.txt)"
+        # 启动 Alist 服务
+        ./alist server --data /tmp/alist_data &
+        
+        # 保持服务运行
+        while true; do sleep 300; done
+
+    - name: Output Info
+      run: |
+        echo "Alist 管理密码: $(cat cred.txt)"
+        echo "访问端点: http://localhost:5244"
+        echo "GitHub Runner IP: $(curl -s icanhazip.com)"
