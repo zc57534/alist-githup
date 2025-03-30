@@ -1,48 +1,51 @@
-name: Alist Public Test
+name: Alist Deployment
 on: [workflow_dispatch]
 
+env:
+  ALIST_DIR: /tmp/alist
+  DATA_DIR: /tmp/alist_data
+
 jobs:
-  deploy-alist:
+  deploy:
     runs-on: ubuntu-latest
-    env:
-      ALIST_DATA_DIR: /tmp/alist_data
     
     steps:
-    # 系统环境准备
+    # 系统环境初始化
     - name: Setup Environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y jq curl wget
-        mkdir -p $ALIST_DATA_DIR
-        
-    # Alist 安装阶段 [1,5](@ref)
+        sudo apt-get install -y curl jq
+        sudo mkdir -p $ALIST_DIR $DATA_DIR
+        sudo chmod 777 $ALIST_DIR $DATA_DIR
+
+    # Alist 安装阶段
     - name: Install Alist
       run: |
-        curl -fsSL "https://alist.nn.ci/v3.sh" | sudo bash -s install
-        sudo chmod +x /usr/bin/alist
-        
-    # 服务启动阶段
-    - name: Start Alist Service
+        curl -fsSL "https://alist.nn.ci/v3.sh" | sudo bash -s install $ALIST_DIR
+        sudo ln -sf $ALIST_DIR/alist /usr/local/bin/alist
+        sudo chmod +x $ALIST_DIR/alist
+
+    # 服务启动与验证
+    - name: Start Service
       run: |
-        nohup sudo alist server --data $ALIST_DATA_DIR > alist.log 2>&1 &
-        sleep 10  # 等待服务启动
-        
-    # 系统信息采集 [2,6](@ref)
-    - name: Get Server Info
-      run: |
-        echo "=== 存储空间 ==="
-        df -h
-        echo "\n=== 内存信息 ==="
-        free -m
-        echo "\n=== CPU 信息 ==="
-        lscpu | grep -E 'Model name|Architecture'
-        echo "\n=== 公网地址 ==="
-        curl -4 icanhazip.com
-        
-    # 访问信息输出
+        nohup sudo alist server --data $DATA_DIR > $ALIST_DIR/alist.log 2>&1 &
+        sleep 15
+        echo "=== 服务状态验证 ==="
+        sudo netstat -tulnp | grep 5244 || (echo "端口未监听"; exit 1)
+
+    # 信息输出
     - name: Show Access Info
       run: |
-        echo "Alist 管理密码：$(sudo alist admin | grep -oP 'password: \K.*')"
-        echo "本地访问地址：http://localhost:5244"
-        echo "运行日志："
-        tail -n 20 alist.log
+        echo "管理密码：$(sudo alist admin | grep -oP 'password: \K.*')"
+        echo "公网IP：$(curl -4 icanhazip.com)"
+        echo "本地访问：http://localhost:5244"
+        echo "数据目录：$DATA_DIR"
+        echo "=== 最后10行日志 ==="
+        tail -n 10 $ALIST_DIR/alist.log
+
+    # 持久化配置（可选）
+    - name: Cache Data
+      uses: actions/cache@v3
+      with:
+        path: $DATA_DIR
+        key: alist-data-${{ github.run_id }}
